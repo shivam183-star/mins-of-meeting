@@ -1,7 +1,9 @@
 import os
 import tempfile
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException
+import json
+import asyncio
+from fastapi import APIRouter, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Any, Dict
 
@@ -9,6 +11,7 @@ from app.speech.pipeline import SpeechPipeline, format_llm_transcript
 from app.llm.generator import MoMGenerator
 from app.llm.schema import MeetingMinutes
 from app.llm.groq_provider import GroqProvider
+from app.meeting.streaming import StreamingMeetingSession
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +71,74 @@ async def process_meeting(audio_file: UploadFile = File(...)):
         logger.error(f"Error processing meeting: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process meeting: {str(e)}")
     finally:
-        # Clean up temporary file
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
                 logger.info(f"Cleaned up temp file {temp_file_path}")
             except Exception as e:
                 logger.warning(f"Failed to clean up temp file {temp_file_path}: {e}")
+
+@router.websocket("/meetings/stream")
+async def websocket_stream(websocket: WebSocket):
+    await websocket.accept()
+    session = StreamingMeetingSession(speech_pipeline, llm_provider)
+    logger.info("WebSocket connection established for streaming meeting.")
+    
+    try:
+        while True:
+            message = await websocket.receive()
+            
+            if "bytes" in message and message["bytes"]:
+                # Binary audio data
+                session.add_audio(message["bytes"])
+                
+                # Extract 60s chunk if ready without blocking
+                chunk_data = session.extract_chunk_if_ready(force=False)
+                if chunk_data:
+                    async def process_and_send(data):
+                        try:
+                            result = await asyncio.to_thread(session._process_chunk, data, False)
+                            if result:
+                                await websocket.send_json({"type": "update", "data": result})
+                        except Exception as e:
+                            logger.error(f"Background processing error: {e}")
+                    
+                    # Fire and forget the processing task
+                    asyncio.create_task(process_and_send(chunk_data))
+                    
+            elif "text" in message and message["text"]:
+                event = json.loads(message["text"])
+                if event.get("type") == "end_meeting":
+                    logger.info("Received end_meeting event. Finalizing...")
+                    
+                    # Process remaining backlog in exactly 60s chunks
+                    while True:
+                        # Wait if a chunk is currently being processed
+                        while session.is_processing:
+                            await asyncio.sleep(1)
+                            
+                        chunk_data = session.extract_chunk_if_ready(force=False)
+                        if chunk_data:
+                            result = await asyncio.to_thread(session._process_chunk, chunk_data, False)
+                            await websocket.send_json({"type": "update", "data": result})
+                        else:
+                            break
+                    
+                    # Finally process whatever is left (< 60s)
+                    chunk_data = session.extract_chunk_if_ready(force=True)
+                    if chunk_data:
+                        result = await asyncio.to_thread(session._process_chunk, chunk_data, True)
+                        await websocket.send_json({"type": "final_update", "data": result})
+                    else:
+                        await websocket.send_json({"type": "final_update", "data": None})
+                    
+                    await websocket.close()
+                    break
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        try:
+            await websocket.close(code=1011)
+        except:
+            pass
