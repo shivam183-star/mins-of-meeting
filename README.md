@@ -104,12 +104,25 @@ Edit `.env`:
 - Set `COMPUTE_TYPE=float16` (Highly recommended for speed and memory efficiency on GPUs).
 - Provide your `HF_TOKEN` and `GROQ_API_KEY`.
 
-*(Optional)*: If you want to use a high-context local LLM (like Llama-3-70B) on the DGX to handle 2-hour long transcripts natively without Groq, you can implement a custom `LocalProvider` in `app/llm/provider.py` and point the `MoMGenerator` to it.
+### 4. Optional: Using a Local High-Context LLM on DGX Spark
+If you are processing very long meetings (1-2 hours) via static file upload, the Groq API might hit context length limits. You can switch to a local LLM running natively on the DGX GPU.
+Because the DGX Spark uses Unified Memory, the recommended strategy is to use **Llama-3-8B-Instruct (128k context)**, which easily fits within the memory limits while still providing a huge context window for long meetings.
 
-### 4. Running the Server
-Start the server just like on CPU:
+1. Ensure your local OpenAI-compatible API (e.g., vLLM) is running on the DGX.
+   ```bash
+   python -m vLLM.entrypoints.openai.api_server \
+       --model meta-llama/Meta-Llama-3-8B-Instruct \
+       --port 8000
+   ```
+2. Edit `.env`:
+   - Set `LLM_PROVIDER=local`
+   - Set `LOCAL_LLM_BASE_URL` to your local endpoint (e.g., `http://localhost:8000/v1`)
+   - Set `LOCAL_LLM_MODEL` to `meta-llama/Meta-Llama-3-8B-Instruct`
+
+### 5. Running the Server
+Start the server just like on CPU (ensure you run on a different port if vLLM is using 8000!):
 ```bash
-python start_server.py
+uvicorn app.api.server:app --port 8080
 ```
 
 With the GPU enabled, WhisperX transcription and Pyannote diarization will run significantly faster (expect < 5 seconds of processing time per 60 seconds of audio).

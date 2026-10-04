@@ -27,8 +27,13 @@ class Config:
     # LLM Settings
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
     GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq") # 'groq' or 'local'
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0"))
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+    
+    # Local LLM Settings (for DGX Spark)
+    LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:8000/v1")
+    LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
+    LOCAL_LLM_API_KEY = os.getenv("LOCAL_LLM_API_KEY", "EMPTY")
 
 config = Config()

@@ -11,7 +11,9 @@ from app.speech.pipeline import SpeechPipeline, format_llm_transcript
 from app.llm.generator import MoMGenerator
 from app.llm.schema import MeetingMinutes
 from app.llm.groq_provider import GroqProvider
+from app.llm.local_provider import LocalProvider
 from app.meeting.streaming import StreamingMeetingSession
+from app.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,14 @@ router = APIRouter()
 
 # Instantiate the pipeline components globally so models are cached in RAM
 speech_pipeline = SpeechPipeline()
-llm_provider = GroqProvider()
+
+if config.LLM_PROVIDER.lower() == "local":
+    logger.info("Using Local LLM Provider")
+    llm_provider = LocalProvider()
+else:
+    logger.info("Using Groq LLM Provider")
+    llm_provider = GroqProvider()
+
 mom_generator = MoMGenerator(llm_provider)
 
 class ProcessResponse(BaseModel):
